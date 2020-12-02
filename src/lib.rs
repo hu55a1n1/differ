@@ -76,6 +76,15 @@ fn matching_chunk_hash(hashes: &[ChunkHash], weak_hash: WeakHash) -> Option<&Chu
     None
 }
 
+fn add_remaining_raw<'a>(mut delta: Delta<'a>, data: &'a [u8], last_match_end: Option<usize>, pos: usize) -> Delta<'a> {
+    if let Some(last_match_end) = last_match_end {
+        if last_match_end != pos {
+            delta.ops.push(Ops::Raw { offset: last_match_end, data: &data[last_match_end..pos] });
+        }
+    }
+    delta
+}
+
 fn get_delta<'a>(data: &'a [u8], signature: &'a Signature) -> Delta<'a> {
     let window = signature.chunk_sz;
     let mut delta = Delta { full_checksum: md5::compute(data), ops: vec![] };
@@ -86,16 +95,14 @@ fn get_delta<'a>(data: &'a [u8], signature: &'a Signature) -> Delta<'a> {
         if let Some(chash) = matching_chunk_hash(&signature.hashes, rh) {
             let sh = md5::compute(&data[i..(i + window)]);
             if sh == chash.strong {
-                if let Some(last_match_end) = last_match_end {
-                    if last_match_end != i {
-                        delta.ops.push(Ops::Raw { offset: last_match_end, data: &data[last_match_end..i] });
-                    }
-                }
+                delta = add_remaining_raw(delta, data, last_match_end, i);
                 delta.ops.push(Ops::Chunk(chash));
                 last_match_end = Some(i + window);
             }
         }
     }
+
+    delta = add_remaining_raw(delta, data, last_match_end, data.len());
     delta
 }
 
