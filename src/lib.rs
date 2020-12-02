@@ -124,7 +124,7 @@ impl Iterator for RollingHashItr<'_> {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        if self.counter >= (self.data.len() - self.window) {
+        if self.counter > (self.data.len() - self.window) {
             return None;
         } else if self.counter == 0 {
             self.hash = adler32::RollingAdler32::from_buffer(&self.data[..self.window]);
