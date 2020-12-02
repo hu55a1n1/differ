@@ -25,7 +25,7 @@ impl Signature {
 #[derive(Debug)]
 enum Ops<'a> {
     Chunk(&'a ChunkHash),
-    Liternal { offset: usize, data: &'a [u8] },
+    Raw { offset: usize, data: &'a [u8] },
 }
 
 #[derive(Debug)]
@@ -58,7 +58,6 @@ fn get_signature(data: &[u8], chunk_sz: usize) -> Result<Signature, Error> {
 
     let mut sig = Signature::new(chunk_sz);
     let chunks = data.chunks(chunk_sz).collect::<Vec<&[u8]>>();
-
     for (id, &chunk) in chunks.iter().enumerate() {
         let strong = md5::compute(chunk);
         let weak = adler32::adler32(chunk).expect("reading from chunk cannot fail");
@@ -78,32 +77,58 @@ fn matching_chunk_hash(hashes: &[ChunkHash], weak_hash: WeakHash) -> Option<&Chu
 }
 
 fn get_delta<'a>(data: &'a [u8], signature: &'a Signature) -> Delta<'a> {
-    let mut d = Delta { full_checksum: md5::compute(data), ops: vec![] };
-    let mut h = adler32::RollingAdler32::default();
+    let window = signature.chunk_sz;
+    let mut delta = Delta { full_checksum: md5::compute(data), ops: vec![] };
+    let rh_itr = RollingHashItr::new(data, window);
     let mut last_match_end: Option<usize> = None;
 
-    for i in 0..(data.len() - signature.chunk_sz) {
-        if i == 0 {
-            h = adler32::RollingAdler32::from_buffer(&data[..signature.chunk_sz]);
-        } else {
-            h.remove(signature.chunk_sz, data[i - 1]);
-            h.update(data[signature.chunk_sz + i - 1]);
-        }
-        let wh = h.hash();
-        if let Some(chash) = matching_chunk_hash(&signature.hashes, wh) {
-            let sh = md5::compute(&data[i..(i + signature.chunk_sz)]);
+    for (i, rh) in rh_itr {
+        if let Some(chash) = matching_chunk_hash(&signature.hashes, rh) {
+            let sh = md5::compute(&data[i..(i + window)]);
             if sh == chash.strong {
                 if let Some(last_match_end) = last_match_end {
                     if last_match_end != i {
-                        d.ops.push(Ops::Liternal { offset: last_match_end, data: &data[last_match_end..i] });
+                        delta.ops.push(Ops::Raw { offset: last_match_end, data: &data[last_match_end..i] });
                     }
                 }
-                d.ops.push(Ops::Chunk(chash));
-                last_match_end = Some(i + signature.chunk_sz);
+                delta.ops.push(Ops::Chunk(chash));
+                last_match_end = Some(i + window);
             }
         }
     }
-    d
+    delta
+}
+
+struct RollingHashItr<'a> {
+    counter: usize,
+    data: &'a [u8],
+    window: usize,
+    hash: adler32::RollingAdler32,
+}
+
+impl RollingHashItr<'_> {
+    fn new(data: &[u8], window: usize) -> RollingHashItr {
+        RollingHashItr { counter: 0, data, window, hash: adler32::RollingAdler32::default() }
+    }
+}
+
+impl Iterator for RollingHashItr<'_> {
+    type Item = (usize, WeakHash);
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.counter >= (self.data.len() - self.window) {
+            return None;
+        } else if self.counter == 0 {
+            self.hash = adler32::RollingAdler32::from_buffer(&self.data[..self.window]);
+            self.counter += 1;
+            return Some((self.counter - 1, self.hash.hash()));
+        }
+        self.hash.remove(self.window, self.data[self.counter - 1]);
+        self.hash.update(self.data[self.window + self.counter - 1]);
+        self.counter += 1;
+        Some((self.counter - 1, self.hash.hash()))
+    }
 }
 
 
