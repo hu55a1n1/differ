@@ -11,18 +11,18 @@ struct ChunkHash {
 }
 
 #[derive(Debug)]
-struct Signature {
+pub struct Signature {
     chunk_sz: usize,
     hashes: Vec<ChunkHash>,
 }
 
 impl Signature {
     #[inline]
-    fn new(chunk_sz: usize) -> Self {
+    pub fn new(chunk_sz: usize) -> Self {
         Signature { chunk_sz, hashes: vec![] }
     }
 
-    fn from_buffer(data: &[u8], chunk_sz: usize) -> Result<Signature, Error> {
+    pub fn from(data: &[u8], chunk_sz: usize) -> Result<Signature, Error> {
         if data.len() < chunk_sz {
             return Err(SignatureError::BadChunkSize.into());
         }
@@ -56,7 +56,7 @@ enum DeltaType<'a> {
 }
 
 #[derive(Debug)]
-struct Delta<'a> {
+pub struct Delta<'a> {
     full_checksum: StrongHash,
     ops: Vec<DeltaType<'a>>,
 }
@@ -71,7 +71,7 @@ impl<'a> Delta<'a> {
         }
     }
 
-    fn from(data: &'a [u8], signature: &'a Signature) -> Delta<'a> {
+    pub fn from(data: &'a [u8], signature: &'a Signature) -> Delta<'a> {
         let window = signature.chunk_sz;
         let mut delta = Delta { full_checksum: md5::compute(data), ops: vec![] };
         let mut last_match_end: Option<usize> = None;
@@ -93,12 +93,12 @@ impl<'a> Delta<'a> {
 }
 
 #[derive(Debug, PartialEq)]
-enum Error {
+pub enum Error {
     SignatureError(SignatureError)
 }
 
 #[derive(Debug, PartialEq)]
-enum SignatureError {
+pub enum SignatureError {
     BadChunkSize
 }
 
@@ -150,15 +150,15 @@ mod tests {
 
     #[test]
     fn test_signature() {
-        let sig = Signature::from_buffer(b"abcdefg", 2);
+        let sig = Signature::from(b"abcdefg", 2);
         println!("{:?}", sig);
         assert!(sig.is_ok());
-        assert_eq!(Signature::from_buffer(b"abcdefg", 8).err().unwrap(), Error::SignatureError(BadChunkSize))
+        assert_eq!(Signature::from(b"abcdefg", 8).err().unwrap(), Error::SignatureError(BadChunkSize))
     }
 
     #[test]
     fn test_delta() {
-        let sig = Signature::from_buffer(b"abcdefgh", 2).unwrap();
+        let sig = Signature::from(b"abcdefgh", 2).unwrap();
         println!("{:?}", sig);
         let delta = Delta::from(b"abtkcdefgh", &sig);
         println!("{:?}", delta);
