@@ -68,7 +68,7 @@ fn get_signature(data: &[u8], chunk_sz: usize) -> Result<Signature, Error> {
     Ok(sig)
 }
 
-fn matching_chunk_hash(hashes: &Vec<ChunkHash>, weak_hash: WeakHash) -> Option<&ChunkHash> {
+fn matching_chunk_hash(hashes: &[ChunkHash], weak_hash: WeakHash) -> Option<&ChunkHash> {
     for hash in hashes {
         if hash.weak == weak_hash {
             return Some(&hash);
@@ -91,19 +91,15 @@ fn get_delta<'a>(data: &'a [u8], signature: &'a Signature) -> Delta<'a> {
         }
         let wh = h.hash();
         if let Some(chash) = matching_chunk_hash(&signature.hashes, wh) {
-            // println!("matching weakHash: {:?} -> {:?}", i, chash.offset);
-
             let sh = md5::compute(&data[i..(i + signature.chunk_sz)]);
             if sh == chash.strong {
-                // println!("matching chunk!");
-
-                if last_match_end.is_some() && last_match_end.unwrap() != i {
-                    d.ops.push(Ops::Liternal { offset: last_match_end.unwrap(), data: &data[last_match_end.unwrap()..i] });
+                if let Some(last_match_end) = last_match_end {
+                    if last_match_end != i {
+                        d.ops.push(Ops::Liternal { offset: last_match_end, data: &data[last_match_end..i] });
+                    }
                 }
                 d.ops.push(Ops::Chunk(chash));
-
                 last_match_end = Some(i + signature.chunk_sz);
-                // i += signature.chunk_sz;
             }
         }
     }
