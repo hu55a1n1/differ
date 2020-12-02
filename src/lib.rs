@@ -1,6 +1,4 @@
-use std::collections::HashMap;
 use std::convert;
-use std::fmt::{Display, Formatter};
 
 type StrongHash = md5::Digest;
 type WeakHash = u32;
@@ -79,12 +77,12 @@ fn matching_chunk_hash(hashes: &Vec<ChunkHash>, weak_hash: WeakHash) -> Option<&
     None
 }
 
-fn delta<'a>(data: &'a[u8], signature: &'a Signature) -> Delta<'a> {
+fn get_delta<'a>(data: &'a [u8], signature: &'a Signature) -> Delta<'a> {
     let mut d = Delta { full_checksum: md5::compute(data), ops: vec![] };
     let mut h = adler32::RollingAdler32::default();
     let mut last_match_end: Option<usize> = None;
 
-    for mut i in 0..(data.len() - signature.chunk_sz) {
+    for i in 0..(data.len() - signature.chunk_sz) {
         if i == 0 {
             h = adler32::RollingAdler32::from_buffer(&data[..signature.chunk_sz]);
         } else {
@@ -116,7 +114,7 @@ fn delta<'a>(data: &'a[u8], signature: &'a Signature) -> Delta<'a> {
 #[cfg(test)]
 mod tests {
     use std::io;
-    use crate::{get_signature, Error, Signature, delta};
+    use crate::{get_signature, Error, get_delta};
     use crate::SignatureError::BadChunkSize;
 
     #[test]
@@ -131,7 +129,7 @@ mod tests {
     fn test_delta() {
         let sig = get_signature(b"abcdefgh", 2).unwrap();
         println!("{:?}", sig);
-        let delta = delta(b"abtkcdefgh", &sig);
+        let delta = get_delta(b"abtkcdefgh", &sig);
         println!("{:?}", delta);
     }
 
