@@ -1,8 +1,12 @@
 use std::convert;
 
+/// Strong hash digest type (i.e. MD5).
 type StrongHash = md5::Digest;
+
+/// Weak hash digest type (i.e. adler32).
 type WeakHash = u32;
 
+/// Hashes associated with a `Chunk`.
 #[derive(Debug, Eq, PartialEq)]
 struct ChunkHash {
     offset: usize,
@@ -10,6 +14,7 @@ struct ChunkHash {
     weak: WeakHash,
 }
 
+/// `Signature` represents a collection of `ChunkHashes` calculated for every `chunk_sz`.
 #[derive(Debug)]
 pub struct Signature {
     chunk_sz: usize,
@@ -18,13 +23,14 @@ pub struct Signature {
 
 impl Signature {
     #[inline]
-    pub fn new(chunk_sz: usize) -> Self {
+    fn new(chunk_sz: usize) -> Self {
         Signature {
             chunk_sz,
             hashes: vec![],
         }
     }
 
+    /// Creates a `Signature` for given `data` slice and `chunk_sz`
     pub fn from(data: &[u8], chunk_sz: usize) -> Result<Signature, Error> {
         if data.len() < chunk_sz {
             return Err(SignatureError::BadChunkSize.into());
@@ -57,16 +63,17 @@ impl Signature {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
-enum DeltaType<'a> {
-    Chunk(&'a ChunkHash),
-    Raw { offset: usize, data: &'a [u8] },
-}
-
+/// `Delta` represents the diff between two data sets
 #[derive(Debug, Eq, PartialEq)]
 pub struct Delta<'a> {
     full_checksum: StrongHash,
     ops: Vec<DeltaType<'a>>,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum DeltaType<'a> {
+    Chunk(&'a ChunkHash),
+    Raw { offset: usize, data: &'a [u8] },
 }
 
 impl<'a> Delta<'a> {
@@ -80,6 +87,7 @@ impl<'a> Delta<'a> {
         }
     }
 
+    /// Creates a `Delta` from given `data` slice and `Signature`
     pub fn from(data: &'a [u8], signature: &'a Signature) -> Delta<'a> {
         let window = signature.chunk_sz;
         let mut delta = Delta {
@@ -108,11 +116,13 @@ impl<'a> Delta<'a> {
     }
 }
 
+/// Error type that represents all possible errors in the lib
 #[derive(Debug, PartialEq)]
 pub enum Error {
     SignatureError(SignatureError),
 }
 
+/// Errors reported by the `Signature` facility
 #[derive(Debug, PartialEq)]
 pub enum SignatureError {
     BadChunkSize,
@@ -202,7 +212,10 @@ mod tests {
             full_checksum: delta1.full_checksum,
             ops: vec![
                 Chunk(&sig.hashes[0]),
-                Raw { offset: 2, data: &[b't', b'k'] },
+                Raw {
+                    offset: 2,
+                    data: &[b't', b'k'],
+                },
                 Chunk(&sig.hashes[1]),
                 Chunk(&sig.hashes[2]),
                 Chunk(&sig.hashes[3]),
@@ -218,10 +231,16 @@ mod tests {
         let delta2 = Delta {
             full_checksum: delta1.full_checksum,
             ops: vec![
-                Raw { offset: 0, data: &[b'a', b'b', b't', b'k', b'c'] },
+                Raw {
+                    offset: 0,
+                    data: &[b'a', b'b', b't', b'k', b'c'],
+                },
                 Chunk(&sig.hashes[3]),
                 Chunk(&sig.hashes[4]),
-                Raw { offset: 9, data: &[b'h'] },
+                Raw {
+                    offset: 9,
+                    data: &[b'h'],
+                },
             ],
         };
         assert_eq!(delta1, delta2);
@@ -234,11 +253,17 @@ mod tests {
         let delta2 = Delta {
             full_checksum: delta1.full_checksum,
             ops: vec![
-                Raw { offset: 0, data: &[b'a'] },
+                Raw {
+                    offset: 0,
+                    data: &[b'a'],
+                },
                 Chunk(&sig.hashes[1]),
                 Chunk(&sig.hashes[2]),
                 Chunk(&sig.hashes[3]),
-                Raw { offset: 7, data: &[b'h'] },
+                Raw {
+                    offset: 7,
+                    data: &[b'h'],
+                },
             ],
         };
         assert_eq!(delta1, delta2);
@@ -251,7 +276,10 @@ mod tests {
         let delta2 = Delta {
             full_checksum: delta1.full_checksum,
             ops: vec![
-                Raw { offset: 0, data: &[b'a', b'b'] },
+                Raw {
+                    offset: 0,
+                    data: &[b'a', b'b'],
+                },
                 Chunk(&sig.hashes[1]),
                 Chunk(&sig.hashes[2]),
             ],
