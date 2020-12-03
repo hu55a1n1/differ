@@ -90,6 +90,10 @@ impl<'a> Delta<'a> {
 
         let rh_itr = RollingHashItr::new(data, window);
         for (pos, rh) in rh_itr {
+            if pos < last_match_end {
+                continue;
+            }
+
             if let Some(chash) = signature.find(rh) {
                 if chash.strong == md5::compute(&data[pos..(pos + window)]) {
                     delta.add_raw(data, last_match_end, pos);
