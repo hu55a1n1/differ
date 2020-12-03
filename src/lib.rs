@@ -70,14 +70,12 @@ pub struct Delta<'a> {
 
 impl<'a> Delta<'a> {
     #[inline]
-    fn add_raw(&mut self, data: &'a [u8], last_match_end: Option<usize>, pos: usize) {
-        if let Some(last_match_end) = last_match_end {
-            if last_match_end != pos {
-                self.ops.push(DeltaType::Raw {
-                    offset: last_match_end,
-                    data: &data[last_match_end..pos],
-                });
-            }
+    fn add_raw(&mut self, data: &'a [u8], last_match_end: usize, pos: usize) {
+        if last_match_end != pos {
+            self.ops.push(DeltaType::Raw {
+                offset: last_match_end,
+                data: &data[last_match_end..pos],
+            });
         }
     }
 
@@ -87,7 +85,7 @@ impl<'a> Delta<'a> {
             full_checksum: md5::compute(data),
             ops: vec![],
         };
-        let mut last_match_end: Option<usize> = None;
+        let mut last_match_end = 0usize;
 
         let rh_itr = RollingHashItr::new(data, window);
         for (pos, rh) in rh_itr {
@@ -95,7 +93,7 @@ impl<'a> Delta<'a> {
                 if chash.strong == md5::compute(&data[pos..(pos + window)]) {
                     delta.add_raw(data, last_match_end, pos);
                     delta.ops.push(DeltaType::Chunk(chash));
-                    last_match_end = Some(pos + window);
+                    last_match_end = pos + window;
                 }
             }
         }
@@ -176,23 +174,84 @@ mod tests {
     }
 
     #[test]
-    fn test_delta() {
+    fn test_delta_identical() {
         let sig = Signature::from(b"abcdefgh", 2).unwrap();
-        let delta = Delta::from(b"abtkcdefgh", &sig);
+        let delta1 = Delta::from(b"abcdefgh", &sig);
         let delta2 = Delta {
-            full_checksum: delta.full_checksum,
+            full_checksum: delta1.full_checksum,
             ops: vec![
                 Chunk(&sig.hashes[0]),
-                Raw {
-                    offset: 2,
-                    data: &[116, 107],
-                },
                 Chunk(&sig.hashes[1]),
                 Chunk(&sig.hashes[2]),
                 Chunk(&sig.hashes[3]),
             ],
         };
-        assert_eq!(delta, delta2);
+        assert_eq!(delta1, delta2);
+    }
+
+    #[test]
+    fn test_delta_mid_raw() {
+        let sig = Signature::from(b"abcdefgh", 2).unwrap();
+        let delta1 = Delta::from(b"abtkcdefgh", &sig);
+        let delta2 = Delta {
+            full_checksum: delta1.full_checksum,
+            ops: vec![
+                Chunk(&sig.hashes[0]),
+                Raw { offset: 2, data: &[b't', b'k'] },
+                Chunk(&sig.hashes[1]),
+                Chunk(&sig.hashes[2]),
+                Chunk(&sig.hashes[3]),
+            ],
+        };
+        assert_eq!(delta1, delta2);
+    }
+
+    #[test]
+    fn test_delta_start_end_odd() {
+        let sig = Signature::from(b"qweabcdefghop", 2).unwrap();
+        let delta1 = Delta::from(b"abtkcdefgh", &sig);
+        let delta2 = Delta {
+            full_checksum: delta1.full_checksum,
+            ops: vec![
+                Raw { offset: 0, data: &[b'a', b'b', b't', b'k', b'c'] },
+                Chunk(&sig.hashes[3]),
+                Chunk(&sig.hashes[4]),
+                Raw { offset: 9, data: &[b'h'] },
+            ],
+        };
+        assert_eq!(delta1, delta2);
+    }
+
+    #[test]
+    fn test_delta_prefix() {
+        let sig = Signature::from(b"aabcdefgh", 2).unwrap();
+        let delta1 = Delta::from(b"abcdefgh", &sig);
+        let delta2 = Delta {
+            full_checksum: delta1.full_checksum,
+            ops: vec![
+                Raw { offset: 0, data: &[b'a'] },
+                Chunk(&sig.hashes[1]),
+                Chunk(&sig.hashes[2]),
+                Chunk(&sig.hashes[3]),
+                Raw { offset: 7, data: &[b'h'] },
+            ],
+        };
+        assert_eq!(delta1, delta2);
+    }
+
+    #[test]
+    fn test_delta_odd_chunk_sz() {
+        let sig = Signature::from(b"aabcdefghijk", 3).unwrap();
+        let delta1 = Delta::from(b"abcdefgh", &sig);
+        let delta2 = Delta {
+            full_checksum: delta1.full_checksum,
+            ops: vec![
+                Raw { offset: 0, data: &[b'a', b'b'] },
+                Chunk(&sig.hashes[1]),
+                Chunk(&sig.hashes[2]),
+            ],
+        };
+        assert_eq!(delta1, delta2);
     }
 
     #[test]
