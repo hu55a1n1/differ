@@ -3,7 +3,7 @@ use std::convert;
 type StrongHash = md5::Digest;
 type WeakHash = u32;
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 struct ChunkHash {
     offset: usize,
     strong: StrongHash,
@@ -19,7 +19,10 @@ pub struct Signature {
 impl Signature {
     #[inline]
     pub fn new(chunk_sz: usize) -> Self {
-        Signature { chunk_sz, hashes: vec![] }
+        Signature {
+            chunk_sz,
+            hashes: vec![],
+        }
     }
 
     pub fn from(data: &[u8], chunk_sz: usize) -> Result<Signature, Error> {
@@ -32,7 +35,11 @@ impl Signature {
         for (id, &chunk) in chunks.iter().enumerate() {
             let strong = md5::compute(chunk);
             let weak = adler32::adler32(chunk).expect("reading from chunk cannot fail");
-            sig.hashes.push(ChunkHash { offset: chunk_sz * id, strong, weak });
+            sig.hashes.push(ChunkHash {
+                offset: chunk_sz * id,
+                strong,
+                weak,
+            });
         }
 
         Ok(sig)
@@ -49,13 +56,13 @@ impl Signature {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 enum DeltaType<'a> {
     Chunk(&'a ChunkHash),
     Raw { offset: usize, data: &'a [u8] },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct Delta<'a> {
     full_checksum: StrongHash,
     ops: Vec<DeltaType<'a>>,
@@ -66,14 +73,20 @@ impl<'a> Delta<'a> {
     fn add_raw(&mut self, data: &'a [u8], last_match_end: Option<usize>, pos: usize) {
         if let Some(last_match_end) = last_match_end {
             if last_match_end != pos {
-                self.ops.push(DeltaType::Raw { offset: last_match_end, data: &data[last_match_end..pos] });
+                self.ops.push(DeltaType::Raw {
+                    offset: last_match_end,
+                    data: &data[last_match_end..pos],
+                });
             }
         }
     }
 
     pub fn from(data: &'a [u8], signature: &'a Signature) -> Delta<'a> {
         let window = signature.chunk_sz;
-        let mut delta = Delta { full_checksum: md5::compute(data), ops: vec![] };
+        let mut delta = Delta {
+            full_checksum: md5::compute(data),
+            ops: vec![],
+        };
         let mut last_match_end: Option<usize> = None;
 
         let rh_itr = RollingHashItr::new(data, window);
@@ -94,14 +107,13 @@ impl<'a> Delta<'a> {
 
 #[derive(Debug, PartialEq)]
 pub enum Error {
-    SignatureError(SignatureError)
+    SignatureError(SignatureError),
 }
 
 #[derive(Debug, PartialEq)]
 pub enum SignatureError {
-    BadChunkSize
+    BadChunkSize,
 }
-
 
 impl convert::From<SignatureError> for Error {
     fn from(err: SignatureError) -> Self {
@@ -118,7 +130,12 @@ struct RollingHashItr<'a> {
 
 impl RollingHashItr<'_> {
     fn new(data: &[u8], window: usize) -> RollingHashItr {
-        RollingHashItr { counter: 0, data, window, hash: adler32::RollingAdler32::default() }
+        RollingHashItr {
+            counter: 0,
+            data,
+            window,
+            hash: adler32::RollingAdler32::default(),
+        }
     }
 }
 
@@ -141,27 +158,41 @@ impl Iterator for RollingHashItr<'_> {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
-    use std::io;
-    use crate::{Error, Signature, Delta};
+    use crate::DeltaType::{Chunk, Raw};
     use crate::SignatureError::BadChunkSize;
+    use crate::{Delta, Error, Signature};
+    use std::io;
 
     #[test]
     fn test_signature() {
         let sig = Signature::from(b"abcdefg", 2);
-        println!("{:?}", sig);
         assert!(sig.is_ok());
-        assert_eq!(Signature::from(b"abcdefg", 8).err().unwrap(), Error::SignatureError(BadChunkSize))
+        assert_eq!(
+            Signature::from(b"abcdefg", 8).err().unwrap(),
+            Error::SignatureError(BadChunkSize)
+        )
     }
 
     #[test]
     fn test_delta() {
         let sig = Signature::from(b"abcdefgh", 2).unwrap();
-        println!("{:?}", sig);
         let delta = Delta::from(b"abtkcdefgh", &sig);
-        println!("{:?}", delta);
+        let delta2 = Delta {
+            full_checksum: delta.full_checksum,
+            ops: vec![
+                Chunk(&sig.hashes[0]),
+                Raw {
+                    offset: 2,
+                    data: &[116, 107],
+                },
+                Chunk(&sig.hashes[1]),
+                Chunk(&sig.hashes[2]),
+                Chunk(&sig.hashes[3]),
+            ],
+        };
+        assert_eq!(delta, delta2);
     }
 
     #[test]
@@ -194,14 +225,13 @@ mod tests {
                     v.push(h.hash());
                 }
             }
-
-            println!("{:?} -> {:?}", h.hash(), adler32_slow(&total[(total.len() - window)..]).unwrap());
-            println!("{:?}", v);
-
-            assert_eq!(h.hash(), adler32_slow(&total[(total.len() - window)..]).unwrap());
+            assert_eq!(
+                h.hash(),
+                adler32_slow(&total[(total.len() - window)..]).unwrap()
+            );
         }
-        do_test(b"abcd", 1);
 
+        do_test(b"abcd", 1);
         do_test(b"a", 1);
         do_test(b"th", 1);
         do_test(b"this a test", 4);
