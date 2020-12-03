@@ -32,6 +32,7 @@ impl Signature {
 
         let mut sig = Signature::new(chunk_sz);
         let chunks = data.chunks(chunk_sz).collect::<Vec<&[u8]>>();
+        sig.hashes.reserve_exact(chunks.len());
         for (id, &chunk) in chunks.iter().enumerate() {
             let strong = md5::compute(chunk);
             let weak = adler32::adler32(chunk).expect("reading from chunk cannot fail");
