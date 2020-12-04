@@ -89,28 +89,30 @@ impl<'a> Delta<'a> {
 
     /// Creates a `Delta` from given `data` slice and `Signature`
     pub fn from(data: &'a [u8], signature: &'a Signature) -> Delta<'a> {
-        let window = signature.chunk_sz;
         let mut delta = Delta {
             full_checksum: md5::compute(data),
             ops: vec![],
         };
         let mut last_match_end = 0usize;
 
-        let rh_itr = RollingHashItr::new(data, window);
-        for (pos, rh) in rh_itr {
+        let rh_itr = RollingHashItr::new(data, signature.chunk_sz);
+        for (pos, chunk_sz, rh) in rh_itr {
             if pos < last_match_end {
+                // skip already matched chunk
                 continue;
             }
 
             if let Some(chash) = signature.find(rh) {
-                if chash.strong == md5::compute(&data[pos..(pos + window)]) {
+                if chash.strong == md5::compute(&data[pos..(pos + chunk_sz)]) {
+                    // matching chunk, so add raw bytes between previously matched chunk and this chunk
                     delta.add_raw(data, last_match_end, pos);
                     delta.ops.push(DeltaType::Chunk(chash));
-                    last_match_end = pos + window;
+                    last_match_end = pos + chunk_sz;
                 }
             }
         }
 
+        // add unmatched data as raw bytes
         delta.add_raw(data, last_match_end, data.len());
         delta
     }
@@ -153,21 +155,28 @@ impl RollingHashItr<'_> {
 }
 
 impl Iterator for RollingHashItr<'_> {
-    type Item = (usize, WeakHash);
+    type Item = (usize, usize, WeakHash);
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        if self.counter > (self.data.len() - self.window) {
+        if self.counter >= self.data.len() {
             return None;
         } else if self.counter == 0 {
             self.hash = adler32::RollingAdler32::from_buffer(&self.data[..self.window]);
             self.counter += 1;
-            return Some((self.counter - 1, self.hash.hash()));
+            return Some((self.counter - 1, self.window, self.hash.hash()));
         }
+
+        // slide window
         self.hash.remove(self.window, self.data[self.counter - 1]);
-        self.hash.update(self.data[self.window + self.counter - 1]);
+        if self.counter > (self.data.len() - self.window) {
+            // last chunk maybe smaller than chunk_sz
+            self.window -= 1;
+        } else {
+            self.hash.update(self.data[self.window + self.counter - 1]);
+        }
         self.counter += 1;
-        Some((self.counter - 1, self.hash.hash()))
+        Some((self.counter - 1, self.window, self.hash.hash()))
     }
 }
 
@@ -176,7 +185,7 @@ mod tests {
     use crate::DeltaType::{Chunk, Raw};
     use crate::SignatureError::BadChunkSize;
     use crate::{Delta, Error, Signature};
-    use std::io;
+    use std::{fs, io};
 
     #[test]
     fn test_signature() {
@@ -199,6 +208,21 @@ mod tests {
                 Chunk(&sig.hashes[1]),
                 Chunk(&sig.hashes[2]),
                 Chunk(&sig.hashes[3]),
+            ],
+        };
+        assert_eq!(delta1, delta2);
+    }
+
+    #[test]
+    fn test_delta_identical_odd() {
+        let sig = Signature::from(b"abcdefgh", 3).unwrap();
+        let delta1 = Delta::from(b"abcdefgh", &sig);
+        let delta2 = Delta {
+            full_checksum: delta1.full_checksum,
+            ops: vec![
+                Chunk(&sig.hashes[0]),
+                Chunk(&sig.hashes[1]),
+                Chunk(&sig.hashes[2]),
             ],
         };
         assert_eq!(delta1, delta2);
@@ -260,10 +284,7 @@ mod tests {
                 Chunk(&sig.hashes[1]),
                 Chunk(&sig.hashes[2]),
                 Chunk(&sig.hashes[3]),
-                Raw {
-                    offset: 7,
-                    data: &[b'h'],
-                },
+                Chunk(&sig.hashes[4]),
             ],
         };
         assert_eq!(delta1, delta2);
@@ -280,6 +301,23 @@ mod tests {
                     offset: 0,
                     data: &[b'a', b'b'],
                 },
+                Chunk(&sig.hashes[1]),
+                Chunk(&sig.hashes[2]),
+            ],
+        };
+        assert_eq!(delta1, delta2);
+    }
+
+    #[test]
+    fn test_delta_for_files() {
+        let b = fs::read("data/b.txt").expect("Unable to read test file");
+        let a = fs::read("data/a.txt").expect("Unable to read test file");
+        let sig = Signature::from(&b, 2).unwrap();
+        let delta1 = Delta::from(&a, &sig);
+        let delta2 = Delta {
+            full_checksum: delta1.full_checksum,
+            ops: vec![
+                Chunk(&sig.hashes[0]),
                 Chunk(&sig.hashes[1]),
                 Chunk(&sig.hashes[2]),
             ],
