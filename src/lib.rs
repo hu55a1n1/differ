@@ -184,8 +184,28 @@ impl Iterator for RollingHashItr<'_> {
 mod tests {
     use crate::DeltaType::{Chunk, Raw};
     use crate::SignatureError::BadChunkSize;
-    use crate::{Delta, Error, Signature};
+    use crate::{Delta, DeltaType, Error, Signature};
     use std::{fs, io};
+
+    fn reconstruct(data: &[u8], sig: &Signature, delta: &Delta) -> Vec<u8> {
+        let mut v = vec![];
+        for op in &delta.ops {
+            match op {
+                Chunk(c) => {
+                    let chunk_sz = if c.offset + sig.chunk_sz >= data.len() {
+                        data.len() - c.offset
+                    } else {
+                        sig.chunk_sz
+                    };
+                    v.extend_from_slice(&data[c.offset..(c.offset + chunk_sz)]);
+                }
+                DeltaType::Raw { offset: _, data } => {
+                    v.extend_from_slice(data);
+                }
+            }
+        }
+        v
+    }
 
     #[test]
     fn test_signature() {
@@ -199,8 +219,9 @@ mod tests {
 
     #[test]
     fn test_delta_identical() {
-        let sig = Signature::from(b"abcdefgh", 2).unwrap();
-        let delta1 = Delta::from(b"abcdefgh", &sig);
+        let data = b"abcdefgh";
+        let sig = Signature::from(data, 2).unwrap();
+        let delta1 = Delta::from(data, &sig);
         let delta2 = Delta {
             full_checksum: delta1.full_checksum,
             ops: vec![
@@ -211,6 +232,7 @@ mod tests {
             ],
         };
         assert_eq!(delta1, delta2);
+        assert_eq!(reconstruct(data, &sig, &delta1), data);
     }
 
     #[test]
@@ -312,17 +334,9 @@ mod tests {
     fn test_delta_for_files() {
         let b = fs::read("data/b.txt").expect("Unable to read test file");
         let a = fs::read("data/a.txt").expect("Unable to read test file");
-        let sig = Signature::from(&b, 2).unwrap();
-        let delta1 = Delta::from(&a, &sig);
-        let delta2 = Delta {
-            full_checksum: delta1.full_checksum,
-            ops: vec![
-                Chunk(&sig.hashes[0]),
-                Chunk(&sig.hashes[1]),
-                Chunk(&sig.hashes[2]),
-            ],
-        };
-        assert_eq!(delta1, delta2);
+        let sig = Signature::from(&b, 512).unwrap();
+        let delta = Delta::from(&a, &sig);
+        assert_eq!(reconstruct(&b, &sig, &delta), a);
     }
 
     #[test]
