@@ -1,3 +1,11 @@
+//! A minimal implementation of a diff algorithm inspired by rsync.
+//!
+//! This library implements the signature and delta operations similar to the rdiff utility.
+
+#![deny(missing_docs)]
+#![deny(dead_code)]
+#![forbid(unsafe_code)]
+
 use std::convert;
 
 /// Strong hash digest type (i.e. MD5).
@@ -121,12 +129,14 @@ impl<'a> Delta<'a> {
 /// Error type that represents all possible errors in the lib
 #[derive(Debug, PartialEq)]
 pub enum Error {
+    /// Signature errors
     SignatureError(SignatureError),
 }
 
 /// Errors reported by the `Signature` facility
 #[derive(Debug, PartialEq)]
 pub enum SignatureError {
+    /// Specified chunk size is greater than input data len
     BadChunkSize,
 }
 
